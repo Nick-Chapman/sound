@@ -1,0 +1,2 @@
+run: main.c
+  gcc -g -o run main.c -DPLOT -lSDL2 -Wall
