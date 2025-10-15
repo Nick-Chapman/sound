@@ -29,7 +29,7 @@ oscillator oscillate(float rate, float volume) {
 }
 
 float next(oscillator *os) {
-  float ret = sinf(os->current_step);
+  float ret = SDL_sinf(os->current_step);
   os->current_step += os->step_size;
   return ret * os->volume;
 }
