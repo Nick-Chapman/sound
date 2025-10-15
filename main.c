@@ -9,8 +9,11 @@ const int sample_rate = 44100;
 const float note1 = 523.3; //C
 const float note2 = 622.3; //Eb  (659.3 E)
 const float note3 = 784.0; //G
+//const float note3 = 1.5 * note1;
 
-const float volume = 0.3f;
+const float vol1 = 0.3f;
+const float vol2 = 0.3f;
+const float vol3 = 0.3f;
 
 static unsigned tick = 0;
 
@@ -22,8 +25,10 @@ static void audio_callback(void *userdata, Uint8* stream, int len) {
   for (int i = 0; i < n; i++) {
     tick++;
     const float f = tick * (2 * M_PI) / sample_rate;
-    const float amp = SDL_sinf(note1 * f) + SDL_sinf(note2 * f) + SDL_sinf(note3 * f);
-    fstream[i] = amp * volume;
+    fstream[i] =
+      SDL_sinf(note1 * f) * vol1 +
+      SDL_sinf(note2 * f) * vol2 +
+      SDL_sinf(note3 * f) * vol3;
   }
   static bool first_time = true;
   if (first_time) {
