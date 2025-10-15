@@ -15,13 +15,14 @@ const float vol1 = 0.3f;
 const float vol2 = 0.3f;
 const float vol3 = 0.3f;
 
-static unsigned tick = 0;
+static unsigned tick = 0; // counter for audio samples
+static unsigned eloop = 0; // counter for main event-handling loop (just for info)
 
 static void audio_callback(void *userdata, Uint8* stream, int len) {
   float* fstream = (float*)stream;
   const unsigned n = len / sizeof(float);
   static unsigned cb;
-  printf("%d: callback: len=%d, n=%d (%d)\n", ++cb, len, n, tick);
+  printf("%d: callback: len=%d, n=%d (%d) %d\n", ++cb, len, n, tick, eloop);
   for (int i = 0; i < n; i++) {
     tick++;
     const float f = tick * (2 * M_PI) / sample_rate;
@@ -44,7 +45,7 @@ static void audio_callback(void *userdata, Uint8* stream, int len) {
 
 int main() {
   assert (0 == SDL_Init(SDL_INIT_AUDIO | SDL_INIT_EVENTS));
-  const int number_samples = 5000; //4096;
+  const int number_samples = 8192; //4410; //5000; //4096;
   SDL_AudioSpec spec = {
       .format = AUDIO_F32,
       .channels = 1,
@@ -56,6 +57,8 @@ int main() {
   SDL_PauseAudio(0); //unpause
   bool quit = false;
   while (!quit) {
+    eloop++;
+    //printf(".");
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
       switch (e.type) {
@@ -63,6 +66,7 @@ int main() {
         quit = true;
       }
     }
+    SDL_Delay(10);
   }
   printf("\nquitting!\n");
   return 0;
