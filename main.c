@@ -3,48 +3,24 @@
 #include <stdbool.h>
 #include <assert.h>
 
-typedef struct {
-  unsigned tick;
-  float last_current_step;
-  float last_current_stepA;
-  float current_step;
-  float current_stepA;
-  float step_size;
-  float volume;
-} oscillator;
+const int sample_rate = 44100;
+const float my_note = 523;
+const float rate = sample_rate / my_note;
+const float step_size = (2 * M_PI) / rate;
+const float volume = 0.8f;
 
-static oscillator oscillate(float rate, float volume) {
-  oscillator o = {
-      .tick = 0,
-      .current_step = 0,
-      .volume = volume,
-      .step_size = (2 * M_PI) / rate,
-  };
-  return o;
-}
+static unsigned tick = 0;
 
-static float next(oscillator *os) {
-  os->tick++;
-  os->current_step += os->step_size;
-  os->current_stepA = os->tick * os->step_size;
-  return SDL_sinf(os->current_step) * os->volume; //orig: has audible glitches
-  //return SDL_sinf(os->current_stepA) * os->volume; //better!
-}
-
-static void audio_callback(oscillator *os, float* fstream, int len) {
+static void audio_callback(void *userdata, Uint8* stream, int len) {
+  float* fstream = (float*)stream;
   const unsigned n = len / sizeof(float);
   static unsigned cb;
-  printf("%d: callback: len=%d, n=%d -- %f (%f) %f (%f) \n", ++cb, len, n,
-         os->current_step,
-         os->current_step - os->last_current_step,
-         os->current_stepA,
-         os->current_stepA - os->last_current_stepA
-         );
-  os->last_current_step = os->current_step;
-  os->last_current_stepA = os->current_stepA;
+  printf("%d: callback: len=%d, n=%d (%d)\n", ++cb, len, n, tick);
   for (int i = 0; i < n; i++) {
-    float v = next(os);
-    fstream[i] = v;
+    tick++;
+    float current_step = tick * step_size;
+    float amp = SDL_sinf(current_step) * volume;
+    fstream[i] = amp;
   }
   static bool first_time = true;
   if (first_time) {
@@ -58,21 +34,15 @@ static void audio_callback(oscillator *os, float* fstream, int len) {
   }
 }
 
-const int sample_rate = 44100;
-const float my_note = 523;
-
 int main() {
   assert (0 == SDL_Init(SDL_INIT_AUDIO | SDL_INIT_EVENTS));
-  const float rate = (float) sample_rate / my_note;
-  oscillator osc = oscillate(rate, 0.8f);
   const int number_samples = 4096;
   SDL_AudioSpec spec = {
       .format = AUDIO_F32,
       .channels = 1,
       .freq = sample_rate,
       .samples = number_samples,
-      .callback = (void*)audio_callback,
-      .userdata = &osc,
+      .callback = audio_callback
   };
   assert (0 == SDL_OpenAudio(&spec, NULL));
   SDL_PauseAudio(0); //unpause
