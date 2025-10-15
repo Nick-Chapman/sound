@@ -47,7 +47,7 @@ void oscillator_callback(void *userdata, Uint8 *stream, int len) {
   }
 }
 
-void close() {
+static void close() {
 #ifdef PLOT
   fclose(plot_output);
 #endif
