@@ -10,7 +10,7 @@ with open("plot_output") as f:
 
     fig, axs = plt.subplots(1, 1)
 
-    num_samples = 441
+    num_samples = 441 # at sample rate of 44100, this is 1/100s or 10ms
 
     lines = f.readlines()[:num_samples]
     y = [float(i.strip()) for i in lines]
