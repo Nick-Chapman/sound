@@ -36,8 +36,8 @@ unsigned bytesize_of_file(FILE* file) {
 
 int main(int argc, char* argv[]) {
 
-  char* filename = "happy.wav";
-  //char* filename = argv[1];
+  //char* filename = "happy.wav";
+  char* filename = argv[1];
   printf("reading file: %s\n", filename);
   FILE *file = fopen(filename, "r");
   assert(file);
@@ -46,16 +46,19 @@ int main(int argc, char* argv[]) {
   sample_data = malloc(count_samples * sizeof(SAMPLE));
   assert (count_samples == fread(sample_data,sizeof(SAMPLE),count_samples,file));
 
+  const Uint16 number_channels = *(Uint16*)((char*)sample_data+22);
+  printf("number_channels = %d\n",number_channels);
+
   const Uint32 sample_rate = *(Uint32*)((char*)sample_data+24);
   printf("sample_rate = %d\n",sample_rate);
 
-  const float duration_s = (float)count_samples / sample_rate;
+  const float duration_s = (float)count_samples / sample_rate / number_channels;
   printf("duration = %0.1fs\n",duration_s);
 
   assert (0 == SDL_Init(SDL_INIT_EVERYTHING));
   SDL_AudioSpec spec = {
     .format = AUDIO_S16LSB,
-    .channels = 1,
+    .channels = number_channels,
     .freq = sample_rate,
     .samples = 4096,
     .callback = audio_callback
