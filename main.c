@@ -4,10 +4,13 @@
 #include <assert.h>
 
 const int sample_rate = 44100;
-const float my_note = 523;
-const float rate = sample_rate / my_note;
-const float step_size = (2 * M_PI) / rate;
-const float volume = 0.8f;
+
+// minor chord
+const float note1 = 523.3; //C
+const float note2 = 622.3; //Eb  (659.3 E)
+const float note3 = 784.0; //G
+
+const float volume = 0.3f;
 
 static unsigned tick = 0;
 
@@ -18,9 +21,9 @@ static void audio_callback(void *userdata, Uint8* stream, int len) {
   printf("%d: callback: len=%d, n=%d (%d)\n", ++cb, len, n, tick);
   for (int i = 0; i < n; i++) {
     tick++;
-    float current_step = tick * step_size;
-    float amp = SDL_sinf(current_step) * volume;
-    fstream[i] = amp;
+    const float f = tick * (2 * M_PI) / sample_rate;
+    const float amp = SDL_sinf(note1 * f) + SDL_sinf(note2 * f) + SDL_sinf(note3 * f);
+    fstream[i] = amp * volume;
   }
   static bool first_time = true;
   if (first_time) {
