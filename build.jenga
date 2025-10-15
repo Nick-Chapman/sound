@@ -4,3 +4,10 @@ main.o: main.c
 
 run: main.o
   gcc -o run main.o -lSDL2
+
+
+myplay.o: myplay.c
+  gcc -g -o myplay.o -c myplay.c -Wall -Werror
+
+myplay: myplay.o
+  gcc -o myplay myplay.o -lSDL2
