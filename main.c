@@ -39,7 +39,7 @@ static void audio_callback(void *userdata, Uint8* stream, int len) {
 
 int main() {
   assert (0 == SDL_Init(SDL_INIT_AUDIO | SDL_INIT_EVENTS));
-  const int number_samples = 4096;
+  const int number_samples = 5000; //4096;
   SDL_AudioSpec spec = {
       .format = AUDIO_F32,
       .channels = 1,

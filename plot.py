@@ -10,13 +10,13 @@ with open("plot_output") as f:
 
     fig, axs = plt.subplots(1, 1)
 
-    num_samples = 441 # at sample rate of 44100, this is 1/100s or 10ms
+    num_samples = 4411 # at sample rate of 44100, this is 100ms
 
     lines = f.readlines()[:num_samples]
     y = [float(i.strip()) for i in lines]
     ticks = range(len(lines))
     axs.plot(ticks, y)
-    axs.set_xticks(np.arange(0, num_samples, num_samples//10), np.arange(0, 11, 1))
+    axs.set_xticks(np.arange(0, num_samples, num_samples//10), np.arange(0, 110, 10))
     axs.set_yticks([-1, -0.5, 0, 0.5, 1])
 
     plt.ylabel("Amplitude")
