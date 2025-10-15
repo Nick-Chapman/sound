@@ -2,47 +2,68 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <sys/stat.h>
 
-const int sample_rate = 44100;
-
-const float volume = 1.;
+typedef Sint16 SAMPLE;
 
 static unsigned tick = 0; // counter for audio samples
 
-// Mode A/B -- 3 places to keep in sync
-//typedef float SAMPLE; //A
-typedef Sint16 SAMPLE; //B
+static unsigned count_samples;
+static SAMPLE* sample_data;
 
 static void audio_callback(void *userdata, Uint8* stream8, int len) {
   SAMPLE* stream = (SAMPLE*)stream8;
   const unsigned n = len / sizeof(SAMPLE);
-  static unsigned cb;
-  printf("%3d: callback: len=%d, n=%d (%6d) : \n", ++cb, len, n, tick);
+  //static unsigned cb;
+  //printf("%3d: callback: len=%d, n=%d (%6d) : \n", ++cb, len, n, tick);
   fflush(stdout);
   for (int i = 0; i < n; i++) {
     tick++;
-    const float phase = tick * (2 * M_PI) / sample_rate;
-    const float amp = SDL_sinf(440.0 * phase) * volume;
-    //stream[i] = amp; //A
-    stream[i] = amp * 32768; //B
+    if (tick < count_samples) {
+      stream[i] = sample_data[tick + 22]; //wav header is 44 bytes
+    } else  {
+      stream[i] = 0;
+    }
   }
 }
 
-int main() {
+unsigned bytesize_of_file(FILE* file) {
+  int fd = fileno(file);
+  struct stat stat_buf;
+  fstat(fd, &stat_buf);
+  return stat_buf.st_size;
+}
+
+int main(int argc, char* argv[]) {
+
+  char* filename = "happy.wav";
+  //char* filename = argv[1];
+  printf("reading file: %s\n", filename);
+  FILE *file = fopen(filename, "r");
+  assert(file);
+
+  count_samples = bytesize_of_file(file) / sizeof(SAMPLE);
+  sample_data = malloc(count_samples * sizeof(SAMPLE));
+  assert (count_samples == fread(sample_data,sizeof(SAMPLE),count_samples,file));
+
+  const Uint32 sample_rate = *(Uint32*)((char*)sample_data+24);
+  printf("sample_rate = %d\n",sample_rate);
+
+  const float duration_s = (float)count_samples / sample_rate;
+  printf("duration = %0.1fs\n",duration_s);
+
   assert (0 == SDL_Init(SDL_INIT_EVERYTHING));
-  const int number_samples = 4096;
   SDL_AudioSpec spec = {
-    //.format = AUDIO_F32, //A
-    .format = AUDIO_S16LSB, //B
+    .format = AUDIO_S16LSB,
     .channels = 1,
     .freq = sample_rate,
-    .samples = number_samples,
+    .samples = 4096,
     .callback = audio_callback
   };
   assert (0 == SDL_OpenAudio(&spec, NULL));
   SDL_PauseAudio(0); //unpause
   bool quit = false;
-  while (!quit) {
+  while (!quit && tick < count_samples) {
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
       switch (e.type) {
@@ -53,6 +74,6 @@ int main() {
     }
     SDL_Delay(10);
   }
-  printf("\nquitting!\n");
+  printf("quitting!\n");
   return 0;
 }
