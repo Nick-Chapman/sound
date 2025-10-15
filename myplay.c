@@ -56,17 +56,20 @@ int main(int argc, char* argv[]) {
   printf("duration = %0.1fs\n",duration_s);
 
   assert (0 == SDL_Init(SDL_INIT_EVERYTHING));
+
+  const unsigned batch_size = 4096;
+
   SDL_AudioSpec spec = {
     .format = AUDIO_S16LSB,
     .channels = number_channels,
     .freq = sample_rate,
-    .samples = 4096,
+    .samples = batch_size,
     .callback = audio_callback
   };
   assert (0 == SDL_OpenAudio(&spec, NULL));
   SDL_PauseAudio(0); //unpause
   bool quit = false;
-  while (!quit && tick < count_samples) {
+  while (!quit && tick < count_samples+batch_size) {
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
       switch (e.type) {
