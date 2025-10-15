@@ -1,16 +1,21 @@
-
 #include <SDL2/SDL.h>
 #include <errno.h>
 #include <stdbool.h>
+#include <assert.h>
 
 typedef struct {
+  unsigned tick;
+  float last_current_step;
+  float last_current_stepA;
   float current_step;
+  float current_stepA;
   float step_size;
   float volume;
 } oscillator;
 
 static oscillator oscillate(float rate, float volume) {
   oscillator o = {
+      .tick = 0,
       .current_step = 0,
       .volume = volume,
       .step_size = (2 * M_PI) / rate,
@@ -19,67 +24,58 @@ static oscillator oscillate(float rate, float volume) {
 }
 
 static float next(oscillator *os) {
-  float ret = SDL_sinf(os->current_step);
+  os->tick++;
   os->current_step += os->step_size;
-  return ret * os->volume;
+  os->current_stepA = os->tick * os->step_size;
+  return SDL_sinf(os->current_step) * os->volume; //orig: has audible glitches
+  //return SDL_sinf(os->current_stepA) * os->volume; //better!
 }
 
-static oscillator *the_oscillator;
-
-static void oscillator_callback(void *userdata, Uint8 *stream, int len) {
+static void audio_callback(oscillator *os, float* fstream, int len) {
   const unsigned n = len / sizeof(float);
-  //static unsigned cb;
-  //printf("%d: callback: len=%d, n=%d\n", ++cb, len, n);
-  float *fstream = (float *)stream;
+  static unsigned cb;
+  printf("%d: callback: len=%d, n=%d -- %f (%f) %f (%f) \n", ++cb, len, n,
+         os->current_step,
+         os->current_step - os->last_current_step,
+         os->current_stepA,
+         os->current_stepA - os->last_current_stepA
+         );
+  os->last_current_step = os->current_step;
+  os->last_current_stepA = os->current_stepA;
   for (int i = 0; i < n; i++) {
-    float v = next(the_oscillator);
+    float v = next(os);
     fstream[i] = v;
   }
   static bool first_time = true;
   if (first_time) {
     first_time = false;
-    FILE *plot_output = fopen("plot_output", "w");
-    if (plot_output == NULL) {
-      printf("Failed to open file: %d", errno);
-      exit(1);
-    }
+    FILE *file = fopen("plot_output", "w");
+    assert(file);
     for (int i = 0; i < n; i++) {
-      fprintf(plot_output, "%.5f\n", fstream[i]);
+      fprintf(file, "%.5f\n", fstream[i]);
     }
-    fclose(plot_output);
+    fclose(file);
   }
 }
 
 const int sample_rate = 44100;
-const int number_samples = 4096;
 const float my_note = 523;
 
 int main() {
-
-  if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_EVENTS) < 0) {
-    printf("Failed to initialize SDL: %s\n", SDL_GetError());
-    return 1;
-  }
-
+  assert (0 == SDL_Init(SDL_INIT_AUDIO | SDL_INIT_EVENTS));
   const float rate = (float) sample_rate / my_note;
-  oscillator a4 = oscillate(rate, 0.8f);
-  the_oscillator = &a4;
-
+  oscillator osc = oscillate(rate, 0.8f);
+  const int number_samples = 4096;
   SDL_AudioSpec spec = {
       .format = AUDIO_F32,
       .channels = 1,
       .freq = sample_rate,
       .samples = number_samples,
-      .callback = oscillator_callback,
+      .callback = (void*)audio_callback,
+      .userdata = &osc,
   };
-
-  if (SDL_OpenAudio(&spec, NULL) < 0) {
-    printf("Failed to open Audio Device: %s\n", SDL_GetError());
-    return 1;
-  }
-
-  SDL_PauseAudio(0);
-
+  assert (0 == SDL_OpenAudio(&spec, NULL));
+  SDL_PauseAudio(0); //unpause
   bool quit = false;
   while (!quit) {
     SDL_Event e;
@@ -90,5 +86,6 @@ int main() {
       }
     }
   }
+  printf("\nquitting!\n");
   return 0;
 }
