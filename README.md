@@ -9,8 +9,8 @@ Mod to allow playing small chord of 3 notes. Under control of keys `1`, `2` and 
 $ jenga run c/synth
 ```
 
-New example: Basic `.wav` player. Bit like `aplay`
+Next example: Basic `.wav` player. Bit like `aplay`.
 ```
-$ jenga run c/myplay -- happy.wav
-$ aplay happy.wav
+$ jenga run c/myplay -- sounds/happy.wav
+$ aplay sounds/happy.wav
 ```
