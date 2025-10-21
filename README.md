@@ -14,3 +14,11 @@ Next example: Basic `.wav` player. Bit like `aplay`.
 $ jenga run c/myplay -- sounds/happy.wav
 $ aplay sounds/happy.wav
 ```
+
+Haskell code: sample rate halving:
+```
+$ cp sounds/beat.wav g1
+$ jenga run run g1 g2
+$ ls -l g1 g2
+$ aplay g1 g2
+```
