@@ -1,0 +1,31 @@
+name:                play
+version:             0.1.0.0
+description:         Play with audio using Haskell
+license:             BSD3
+author:              Nick Chapman
+maintainer:          nic@amadido.co.uk
+
+dependencies:
+- base >= 4.7 && < 5
+- containers
+
+default-extensions:
+- DuplicateRecordFields
+- GADTs
+- ImportQualifiedPost
+- LambdaCase
+- NamedFieldPuns
+- ScopedTypeVariables
+
+ghc-options:
+- -Werror
+- -Wall
+- -Wno-name-shadowing
+
+library:
+  source-dirs: src
+
+executables:
+  main.exe:
+    main:                app/main.hs
+    dependencies:        play

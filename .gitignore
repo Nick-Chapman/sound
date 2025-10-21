@@ -1,3 +1,6 @@
 ,jenga
 *~
 plot_output
+.stack-work
+*.cabal
+stack.yaml.lock
