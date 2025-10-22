@@ -22,3 +22,8 @@ $ jenga run run g1 g2
 $ ls -l g1 g2
 $ aplay g1 g2
 ```
+
+More processing modes:
+```
+$ cat sounds/beat.wav | (begin|mono|8bit|hr|rep 2|aplay)
+```

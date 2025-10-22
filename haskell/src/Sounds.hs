@@ -1,6 +1,6 @@
 module Sounds (main) where
 
---import Control.Exception (assert)
+import Control.Exception (assert)
 import Control.Monad (ap,liftM)
 import Data.Bits ((.&.),shiftR)
 import Data.ByteString (ByteString)
@@ -19,64 +19,113 @@ main :: IO ()
 main = do
   args <- getArgs
   let Config{inpath,outpath,mode} = parseConfig args
-  loadWavFile inpath >>= execMode mode >>= saveWav outpath
+  loadWavFile inpath >>= execModeInfo mode >>= saveWav outpath
 
 data Config = Config { inpath :: FilePath, mode :: Mode, outpath :: FilePath }
-data Mode = ThinSampleRate U32 | RepeatWave U32
 
 parseConfig :: [String] -> Config
 parseConfig = \case
-  [inpath,"halve",outpath] ->
-    Config {inpath, mode = ThinSampleRate 2, outpath }
-  [inpath,"thin",n, outpath] ->
-    Config {inpath, mode = ThinSampleRate (read n), outpath }
-  [inpath,"rep",n, outpath] ->
-    Config {inpath, mode = RepeatWave (read n), outpath }
+  [i,"begin"    ,o] -> mk i o $ Begin
+  [i,"thin",n   ,o] -> mk i o $ Thin (read n)
+  [i,"hr"       ,o] -> mk i o $ Thin 2
+  [i,"rep",n    ,o] -> mk i o $ Repeat (read n)
+  [i,"mono"     ,o] -> mk i o $ Mono
+  [i,"8bit"     ,o] -> mk i o $ EightBit
+  [i,"hurry",n  ,o] -> mk i o $ Hurry (read n)
+  [i,"vol",f    ,o] -> mk i o $ Dally (read f)
+  [i,"dally",n  ,o] -> mk i o $ Dally (read n)
   xs ->
     error (printf "unknown args: %s" (show xs))
+  where
+    mk inpath outpath mode =
+      Config { inpath, mode, outpath }
 
-execMode :: Mode -> Wav -> IO Wav
+data Mode
+  = Begin
+  | Thin U32
+  | Repeat U32
+  | Mono
+  | EightBit
+  | Volume Float
+  | Hurry U32
+  | Dally U32
+  deriving Show
+
+execModeInfo :: Mode -> Wav -> IO Wav
+execModeInfo mode w = do
+  let w'@Wav{header} = execMode mode w
+  printf "%s\n" (info (show mode) header)
+  pure w'
+
+execMode :: Mode -> Wav -> Wav
 execMode = \case
-  ThinSampleRate n -> thinSampleRate n
-  RepeatWave n -> repeatWave n
+  Begin -> id
+  Repeat n -> repeatWave n
+  Thin n -> thinSampleRate n
+  Mono -> monoize
+  EightBit -> eightBit
+  Volume{} -> undefined
+  Hurry{} -> undefined
+  Dally{} -> undefined
 
-repeatWave :: U32 -> Wav -> IO Wav
+
+repeatWave :: U32 -> Wav -> Wav
 repeatWave n w = do
   let Wav {header,dat} = w
   let Header {numberOfBlocks=nb} = header
   let nb' = nb * n
-  printf "Repeat wave %d times (#blocks: %d -> %d)\n" n nb nb'
   let header' = header { numberOfBlocks = nb' }
-  let dat' = repeatDat n dat
-  pure $ packWav header' dat'
+  packWav header' (repeatDat n dat)
+  where
+    repeatDat :: U32 -> Dat -> Dat
+    repeatDat n Dat{bs} = Dat $ BS.concat (replicate (cast n) bs)
 
-repeatDat :: U32 -> Dat -> Dat
-repeatDat n Dat{bs} = do
-  let bs' = BS.concat (replicate (cast n) bs)
-  Dat {bs = bs'}
-
-
-thinSampleRate :: U32 -> Wav -> IO Wav
+thinSampleRate :: U32 -> Wav -> Wav
 thinSampleRate factor w = do
   let Wav {header,dat} = w
   let Header {sampleRate=r,numberOfBlocks=nb} = header
   let r' = r `div` factor
   let nb' = nb `div` factor
-  printf "Thin sample rate by %d: %d --> %d (#blocks: %d -> %d)\n"
-    factor r r' nb nb'
   let header' = header { sampleRate = r', numberOfBlocks = nb' }
-  let dat' = thinDat factor header dat
-  pure $ packWav header' dat'
+  packWav header' (thinDat factor header dat)
 
 thinDat :: U32 -> Header -> Dat -> Dat
-thinDat factor header Dat{bs} = do
+thinDat factor header Dat{bs} = Dat $ do
   let Header{numberOfChannels,bitsPerSample,numberOfBlocks} = header
   let bytesPerBlock = cast (numberOfChannels * bitsPerSample `div` 8)
-  let bytes = [ BS.index bs (cast i)
-              | n <- [0.. numberOfBlocks `div` factor - 1]
-              , let off = factor * bytesPerBlock * n
-              , i <- [off .. off + bytesPerBlock - 1] ]
-  Dat (BS.pack bytes)
+  BS.pack [ BS.index bs (cast i)
+          | n <- [0.. numberOfBlocks `div` factor - 1]
+          , let off = factor * bytesPerBlock * n
+          , i <- [off .. off + bytesPerBlock - 1] ]
+
+monoize :: Wav -> Wav
+monoize w = do
+  let Wav {header,dat} = w
+  let Header {numberOfChannels,numberOfBlocks} = header
+  -- The header we want to end up with.
+  let header' = header { numberOfChannels = 1 }
+  -- Pretend the current data is already mono, but with a multiplied #blocks.
+  let hhack = header' { numberOfBlocks = numberOfBlocks * cast numberOfChannels }
+  -- Then we can re-use thinDat
+  packWav header' (thinDat (cast numberOfChannels) hhack dat)
+
+eightBit :: Wav -> Wav
+eightBit w = do
+  let Wav {header,dat} = w
+  let Header {bitsPerSample} = header
+  assert  (bitsPerSample == 16) $ do
+  -- We still write out the Wav using 16bit signed data
+  -- but we zeroed all the lo-order byes
+  -- To do this, we dont need to know how many channels we have
+  packWav header (eightBitDat dat)
+  where
+    eightBitDat :: Dat -> Dat
+    eightBitDat  Dat{bs} = Dat $ do
+      BS.pack [ byte
+              | i <- [0.. BS.length bs `div` 2  - 1 ]
+              , byte <- [ 0, BS.index bs (1 + 2 * cast i) ]
+              ]
+
 
 data Wav = Wav { header :: Header, dat :: Dat }
 
@@ -122,6 +171,22 @@ data Header = Header
   , bitsPerSample :: U16
   , numberOfBlocks :: U32
   } deriving Show
+
+
+info :: String -> Header -> String
+info tag Header{ numberOfChannels, sampleRate, bitsPerSample, numberOfBlocks} = do
+  let duration :: Float = cast numberOfBlocks / cast sampleRate
+  printf "%s: %s %dbit  %6dHz  %0.2fs"
+    (justify 16 tag)
+    (justify 6 (case numberOfChannels of
+                  1 -> "mono"
+                  2 -> "stereo"
+                  n -> printf "%d-chan" n))
+    bitsPerSample
+    sampleRate
+    duration
+  where justify n s = s ++ replicate (n - length s) ' '
+
 
 writeHeader :: FilePath -> Header -> IO ()
 writeHeader path header = do
