@@ -22,7 +22,7 @@ main = do
   loadWavFile inpath >>= execMode mode >>= saveWav outpath
 
 data Config = Config { inpath :: FilePath, mode :: Mode, outpath :: FilePath }
-data Mode = ThinSampleRate U32
+data Mode = ThinSampleRate U32 | RepeatWave U32
 
 parseConfig :: [String] -> Config
 parseConfig = \case
@@ -30,12 +30,31 @@ parseConfig = \case
     Config {inpath, mode = ThinSampleRate 2, outpath }
   [inpath,"thin",n, outpath] ->
     Config {inpath, mode = ThinSampleRate (read n), outpath }
+  [inpath,"rep",n, outpath] ->
+    Config {inpath, mode = RepeatWave (read n), outpath }
   xs ->
     error (printf "unknown args: %s" (show xs))
 
 execMode :: Mode -> Wav -> IO Wav
 execMode = \case
   ThinSampleRate n -> thinSampleRate n
+  RepeatWave n -> repeatWave n
+
+repeatWave :: U32 -> Wav -> IO Wav
+repeatWave n w = do
+  let Wav {header,dat} = w
+  let Header {numberOfBlocks=nb} = header
+  let nb' = nb * n
+  printf "Repeat wave %d times (#blocks: %d -> %d)\n" n nb nb'
+  let header' = header { numberOfBlocks = nb' }
+  let dat' = repeatDat n dat
+  pure $ packWav header' dat'
+
+repeatDat :: U32 -> Dat -> Dat
+repeatDat n Dat{bs} = do
+  let bs' = BS.concat (replicate (cast n) bs)
+  Dat {bs = bs'}
+
 
 thinSampleRate :: U32 -> Wav -> IO Wav
 thinSampleRate factor w = do
