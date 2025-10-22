@@ -7,6 +7,8 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Internal (w2c,c2w)
 import Data.Char qualified as Char
+import Data.Int qualified as Int
+import Data.List.Split (chunksOf)
 import Data.Word qualified as Word
 import System.Environment (getArgs)
 import Text.Printf (printf)
@@ -14,6 +16,7 @@ import Text.Printf (printf)
 type U32 = Word.Word32
 type U16 = Word.Word16
 type U8 = Word.Word8
+type S16 = Int.Int16
 
 main :: IO ()
 main = do
@@ -31,8 +34,8 @@ parseConfig = \case
   [i,"rep",n    ,o] -> mk i o $ Repeat (read n)
   [i,"mono"     ,o] -> mk i o $ Mono
   [i,"8bit"     ,o] -> mk i o $ EightBit
+  [i,"vol",f    ,o] -> mk i o $ Volume (read f)
   [i,"hurry",n  ,o] -> mk i o $ Hurry (read n)
-  [i,"vol",f    ,o] -> mk i o $ Dally (read f)
   [i,"dally",n  ,o] -> mk i o $ Dally (read n)
   xs ->
     error (printf "unknown args: %s" (show xs))
@@ -64,7 +67,7 @@ execMode = \case
   Thin n -> thinSampleRate n
   Mono -> monoize
   EightBit -> eightBit
-  Volume{} -> undefined
+  Volume f -> changeVolume f
   Hurry{} -> undefined
   Dally{} -> undefined
 
@@ -113,7 +116,7 @@ eightBit :: Wav -> Wav
 eightBit w = do
   let Wav {header,dat} = w
   let Header {bitsPerSample} = header
-  assert  (bitsPerSample == 16) $ do
+  assert (bitsPerSample == 16) $ do
   -- We still write out the Wav using 16bit signed data
   -- but we zeroed all the lo-order byes
   -- To do this, we dont need to know how many channels we have
@@ -126,6 +129,16 @@ eightBit w = do
               , byte <- [ 0, BS.index bs (1 + 2 * cast i) ]
               ]
 
+changeVolume :: Float -> Wav -> Wav
+changeVolume f w = do
+  let Wav {header,dat} = w
+  let Header {bitsPerSample} = header
+  assert (bitsPerSample == 16) $ do
+  let dat' = (fromS16 . map (unfloat . attenuate . float) . toS16) dat
+  packWav header dat'
+  where
+    attenuate :: Float -> Float
+    attenuate x = x * f
 
 data Wav = Wav { header :: Header, dat :: Dat }
 
@@ -163,6 +176,13 @@ sizeDat Dat{bs} = cast $ BS.length bs
 
 appendDat :: FilePath -> Dat -> IO ()
 appendDat path Dat{bs} = BS.appendFile path bs
+
+toS16 :: Dat -> [S16]
+toS16 Dat{bs} = [ makeS16 lo hi | [lo,hi] <- chunksOf 2 (BS.unpack bs) ]
+
+
+fromS16 :: [S16] -> Dat
+fromS16 xs = Dat (BS.pack [ b | x <- xs, let (lo,hi) = splitS16 x, b <- [lo,hi]])
 
 
 data Header = Header
@@ -305,13 +325,13 @@ execP par bytes = loop (bytes,0) par kFinal
       U16 -> do
         next s $ \s b1 -> do
           next s $ \s b2 -> do
-            k s (makeLittleEndianU16 b1 b2)
+            k s (makeU16 b1 b2)
       U32 -> do
         next s $ \s b1 -> do
           next s $ \s b2 -> do
             next s $ \s b3 -> do
               next s $ \s b4 -> do
-                k s (makeLittleEndianU32 b1 b2 b3 b4)
+                k s (makeU32 b1 b2 b3 b4)
       Fail mes -> do
         error (printf "bytes parser failed at position %d: %s" (snd s) mes)
 
@@ -325,13 +345,23 @@ execP par bytes = loop (bytes,0) par kFinal
 charOfByte :: U8 -> Char
 charOfByte = w2c
 
-makeLittleEndianU16 :: U8 -> U8 -> U16
-makeLittleEndianU16 a b =
-  cast a + 256 * cast b
-
-makeLittleEndianU32 :: U8 -> U8 -> U8 -> U8 -> U32
-makeLittleEndianU32 a b c d =
-  cast a + 256 * (cast b + 256 * (cast c + 256 * cast d))
-
 cast :: (Integral a, Num b) => a -> b
 cast = fromIntegral -- shorter spelling
+
+makeU16 :: U8 -> U8 -> U16
+makeU16 a b = cast a + 256 * cast b
+
+makeU32 :: U8 -> U8 -> U8 -> U8 -> U32
+makeU32 a b c d = cast a + 256 * (cast b + 256 * (cast c + 256 * cast d))
+
+makeS16 :: U8 -> U8 -> S16
+makeS16 lo hi = cast (cast lo + 256 * cast hi :: Int)
+
+splitS16 :: S16 -> (U8,U8)
+splitS16 x = (cast (x .&. 0xFF) , cast ((x `shiftR` 8) .&. 0xFF))
+
+float :: S16 -> Float
+float = cast
+
+unfloat :: Float -> S16
+unfloat = truncate

@@ -30,3 +30,4 @@ packages:
   touch packages
   #echo MissingH >>packages
   echo bytestring >> packages
+  echo split >> packages
