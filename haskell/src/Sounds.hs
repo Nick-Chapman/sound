@@ -1,5 +1,6 @@
 module Sounds (main) where
 
+--import Control.Exception (assert)
 import Control.Monad (ap,liftM)
 import Data.Bits ((.&.),shiftR)
 import Data.ByteString (ByteString)
@@ -16,37 +17,46 @@ type U8 = Word.Word8
 
 main :: IO ()
 main = do
-  [arg1,arg2] <- getArgs
-  putStrLn "Example: halving sample rate..."
-  pipeline arg1 arg2
-  where
-    pipeline inpath outpath = do
-      w <- loadWavFile inpath
-      print (headerWav w)
-      let w' = halveSampleRate w
-      print (headerWav w')
-      saveWav outpath w'
+  args <- getArgs
+  let Config{inpath,outpath,mode} = parseConfig args
+  loadWavFile inpath >>= execMode mode >>= saveWav outpath
 
-headerWav :: Wav -> Header
-headerWav Wav{header=x} = x
+data Config = Config { inpath :: FilePath, mode :: Mode, outpath :: FilePath }
+data Mode = ThinSampleRate U32
 
-halveSampleRate :: Wav -> Wav
-halveSampleRate w = do
+parseConfig :: [String] -> Config
+parseConfig = \case
+  [inpath,"halve",outpath] ->
+    Config {inpath, mode = ThinSampleRate 2, outpath }
+  [inpath,"thin",n, outpath] ->
+    Config {inpath, mode = ThinSampleRate (read n), outpath }
+  xs ->
+    error (printf "unknown args: %s" (show xs))
+
+execMode :: Mode -> Wav -> IO Wav
+execMode = \case
+  ThinSampleRate n -> thinSampleRate n
+
+thinSampleRate :: U32 -> Wav -> IO Wav
+thinSampleRate factor w = do
   let Wav {header,dat} = w
-  let Header {sampleRate=r,numberOfSamples=n} = header
-  let header' = header { sampleRate = r `div` 2
-                       , numberOfSamples = n `div` 2 }
-  let dat' = everyOtherSample header dat
-  packWav header' dat'
+  let Header {sampleRate=r,numberOfBlocks=nb} = header
+  let r' = r `div` factor
+  let nb' = nb `div` factor
+  printf "Thin sample rate by %d: %d --> %d (#blocks: %d -> %d)\n"
+    factor r r' nb nb'
+  let header' = header { sampleRate = r', numberOfBlocks = nb' }
+  let dat' = thinDat factor header dat
+  pure $ packWav header' dat'
 
-everyOtherSample :: Header -> Dat -> Dat
-everyOtherSample header Dat{bs} = do
-  let Header{numberOfSamples,bitsPerSample} = header
-  let bytesPerSample = fromIntegral bitsPerSample `div` 8
-  let bytes = [ BS.index bs (fromIntegral i)
-              | n <- [0.. (numberOfSamples`div`2)-1 ]
-              , let off = 2 * bytesPerSample * n
-              , i <- [off .. off + bytesPerSample - 1] ]
+thinDat :: U32 -> Header -> Dat -> Dat
+thinDat factor header Dat{bs} = do
+  let Header{numberOfChannels,bitsPerSample,numberOfBlocks} = header
+  let bytesPerBlock = cast (numberOfChannels * bitsPerSample `div` 8)
+  let bytes = [ BS.index bs (cast i)
+              | n <- [0.. numberOfBlocks `div` factor - 1]
+              , let off = factor * bytesPerBlock * n
+              , i <- [off .. off + bytesPerBlock - 1] ]
   Dat (BS.pack bytes)
 
 data Wav = Wav { header :: Header, dat :: Dat }
@@ -61,8 +71,9 @@ makeWav bs = packWav header dat
     dat = makeDat (BS.drop 44 bs)
 
 packWav :: Header -> Dat -> Wav
-packWav header@Header{numberOfSamples,bitsPerSample} dat = do
-  let dataSize = numberOfSamples * (fromIntegral bitsPerSample `div` 8)
+packWav header@Header{bitsPerSample,numberOfChannels,numberOfBlocks} dat = do
+  let bytesPerBlock = cast (numberOfChannels * bitsPerSample `div` 8)
+  let dataSize = numberOfBlocks * bytesPerBlock
   let z = sizeDat dat
   if (dataSize==z)
   then Wav { header, dat }
@@ -80,7 +91,7 @@ makeDat :: ByteString -> Dat
 makeDat bs = Dat { bs }
 
 sizeDat :: Dat -> U32
-sizeDat Dat{bs} = fromIntegral $ BS.length bs
+sizeDat Dat{bs} = cast $ BS.length bs
 
 appendDat :: FilePath -> Dat -> IO ()
 appendDat path Dat{bs} = BS.appendFile path bs
@@ -90,7 +101,7 @@ data Header = Header
   { numberOfChannels :: U16
   , sampleRate :: U32
   , bitsPerSample :: U16
-  , numberOfSamples :: U32
+  , numberOfBlocks :: U32
   } deriving Show
 
 writeHeader :: FilePath -> Header -> IO ()
@@ -104,13 +115,12 @@ byteStringOfHeader Header
   { numberOfChannels
   , sampleRate
   , bitsPerSample
-  , numberOfSamples } = do
-  let dataSize = numberOfSamples * (cast bitsPerSample `div` 8)
+  , numberOfBlocks
+  } = do
+  let bytesPerBlock = numberOfChannels * bitsPerSample `div` 8
+  let bytesPerSecond = sampleRate * cast bytesPerBlock
+  let dataSize = numberOfBlocks * cast bytesPerBlock
   let fileSize = dataSize + (44-8)
-  let bytesPerSecond =
-        sampleRate * cast bitsPerSample * cast numberOfChannels `div` 8
-  let bytesPerBlock =
-        numberOfChannels * bitsPerSample `div` 8
   BS.pack $ concat
     [ str "RIFF"
     , u32 fileSize
@@ -127,21 +137,20 @@ byteStringOfHeader Header
     , u32 dataSize
     ]
     where
-      cast = fromIntegral
       str :: String -> [U8] = map c2w
 
       u16 :: U16 -> [U8]
-      u16 x = [ fromIntegral (x .&. 0xff)
-              , fromIntegral (x `shiftR` 8 .&. 0xff) ]
+      u16 x = [ cast (x .&. 0xff)
+              , cast (x `shiftR` 8 .&. 0xff) ]
 
       u32 :: U32 -> [U8]
-      u32 x = [ fromIntegral (x .&. 0xff)
-              , fromIntegral (x `shiftR` 8 .&. 0xff)
-              , fromIntegral (x `shiftR` 16 .&. 0xff)
-              , fromIntegral (x `shiftR` 24 .&. 0xff) ]
+      u32 x = [ cast (x .&. 0xff)
+              , cast (x `shiftR` 8 .&. 0xff)
+              , cast (x `shiftR` 16 .&. 0xff)
+              , cast (x `shiftR` 24 .&. 0xff) ]
 
 headerPar :: Par Header
-headerPar = mdo
+headerPar = do
   key "RIFF"
   fileSize <- U32
   key "WAVE"
@@ -155,17 +164,15 @@ headerPar = mdo
   bytesPerSecond <- U32
   bytesPerBlock <- U16
   bitsPerSample <- U16
-  assertEq "bytesPerSecond" bytesPerSecond $
-    sampleRate * cast bitsPerSample * cast numberOfChannels `div` 8
   assertEq "bytesPerBlock" bytesPerBlock $
     numberOfChannels * bitsPerSample `div` 8
+  assertEq "bytesPerSecond" bytesPerSecond $
+    sampleRate * cast bytesPerBlock
   key "data"
   dataSize <- U32
   assertEq "fileSize+8" (fileSize+8) (dataSize+44)
-  let numberOfSamples = dataSize `div` (cast bitsPerSample `div` 8)
-  pure Header { numberOfChannels, sampleRate, bitsPerSample, numberOfSamples }
-  where
-    cast = fromIntegral
+  let numberOfBlocks = dataSize `div` cast bytesPerBlock
+  pure Header { numberOfChannels, sampleRate, bitsPerSample, numberOfBlocks }
 
 key :: String -> Par ()
 key xs = sequence_ [ expectChar x | x <- xs ]
@@ -236,8 +243,11 @@ charOfByte = w2c
 
 makeLittleEndianU16 :: U8 -> U8 -> U16
 makeLittleEndianU16 a b =
-  fromIntegral a + 256 * fromIntegral b
+  cast a + 256 * cast b
 
 makeLittleEndianU32 :: U8 -> U8 -> U8 -> U8 -> U32
 makeLittleEndianU32 a b c d =
-  fromIntegral a + 256 * (fromIntegral b + 256 * (fromIntegral c + 256 * fromIntegral d))
+  cast a + 256 * (cast b + 256 * (cast c + 256 * cast d))
+
+cast :: (Integral a, Num b) => a -> b
+cast = fromIntegral -- shorter spelling
