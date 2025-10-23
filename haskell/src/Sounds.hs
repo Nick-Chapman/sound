@@ -43,6 +43,7 @@ parseConfig = \case
   [i,"low"      ,o] -> mk i o $ LowPass
   [i,"high"     ,o] -> mk i o $ HighPass
   [i,"speed",n  ,o] -> mk i o $ Speed (read n)
+  [i,"hurry",n  ,o] -> mk i o $ Hurry (read n)
   xs ->
     error (printf "unknown args: %s" (show xs))
   where
@@ -59,6 +60,7 @@ data Mode
   | Explore_DFT
   | LowPass | HighPass
   | Speed R
+  | Hurry R
   deriving Show
 
 execModeInfo :: Mode -> Wav -> IO Wav
@@ -79,6 +81,7 @@ execMode = \case
   LowPass -> filterWav lowPass
   HighPass -> filterWav highPass
   Speed factor -> pure . speed factor
+  Hurry factor -> hurry factor
 
 
 -- Change speed by modifying sampleRate.
@@ -90,6 +93,51 @@ speed factor w = do
   let r' = truncate (cast r * factor)
   let header' = header { sampleRate = r' }
   packWav header' dat
+
+
+-- Hurry: change speed by dropping chunks of data...
+  -- z: Number of blocks in each chunk.
+  -- Very small, we get pitch increase: ~ <50
+  -- Too small, we get distortion: ~50..500
+  -- Middle, some crackle but not bad: ~500
+  -- Too big, we get audible holes >500
+
+hurry :: R -> Wav -> IO Wav
+hurry factor w = do
+  assert (factor > 1) $ do
+  -- Drop rate is the number of chunks allowed to pass before 1 is dropped
+  let dropRate :: Int = truncate (factor / (factor - 1))
+
+  let Wav {header,dat} = w
+  let Header {numberOfChannels,sampleRate} = header
+
+  let z = 500
+  let dur :: R = cast z * 1000 / cast sampleRate
+  printf "HURRY: drop-chunk-size = %.2fms (%d blocks) ; dropRate: 1 every %d\n"
+    dur z dropRate
+
+  let dropEvery :: Int -> [a] -> [a]
+      dropEvery n = \case
+        [] -> []
+        x:xs ->
+          if n==0
+          then dropEvery dropRate xs
+          else x : dropEvery (n-1) xs
+
+  let size = z * cast numberOfChannels -- chunk size for this op
+
+  let
+    processDat :: Dat -> Dat
+    processDat =
+      fromS16 . map unfloat
+      . concat
+      . dropEvery (dropRate `div` 2) -- start dropping in middle of rate
+      . chunksOf size . prepad 0 size
+      . map float . toS16 -- why bother to convert to S16 stream?
+
+  let header' = header -- fix up needed here?
+  pure $ packWavPatchingSize header' (processDat dat)
+
 
 
 -- Try increasing. Gets slower. Need FFT !!
