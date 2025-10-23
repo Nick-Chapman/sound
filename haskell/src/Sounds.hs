@@ -20,6 +20,7 @@ type U8 = Word.Word8
 type S16 = Int.Int16
 
 type R = Dft.R
+type C = Dft.C
 
 main :: IO ()
 main = do
@@ -41,6 +42,8 @@ parseConfig = \case
   [i,"hurry",n  ,o] -> mk i o $ Hurry (read n)
   [i,"dally",n  ,o] -> mk i o $ Dally (read n)
   [i,"explore"  ,o] -> mk i o $ Explore_DFT
+  [i,"low"      ,o] -> mk i o $ LowPass
+  [i,"high"     ,o] -> mk i o $ HighPass
   xs ->
     error (printf "unknown args: %s" (show xs))
   where
@@ -57,6 +60,7 @@ data Mode
   | Hurry U32
   | Dally U32
   | Explore_DFT
+  | LowPass | HighPass
   deriving Show
 
 execModeInfo :: Mode -> Wav -> IO Wav
@@ -75,16 +79,69 @@ execMode = \case
   Volume f -> pure . changeVolume f
   Hurry{} -> undefined
   Dally{} -> undefined
-  Explore_DFT -> explore chunkSize
+  Explore_DFT -> explore
+  LowPass -> filterWav lowPass
+  HighPass -> filterWav highPass
 
 -- Try increasing. Gets slower. Need FFT !!
 -- (And some chunks have a delta exceeding epsilon)
 chunkSize :: Int
-chunkSize = 8
+chunkSize = 64 -- for the DFT operation
+
+_highPass :: [C] -> [C]
+_highPass fs = do
+  let n = chunkSize `div` 2
+  replicate n (Dft.plex 0) ++ drop n fs
+
+_lowPass :: [C] -> [C]
+_lowPass fs = do
+  let n = chunkSize `div` 2
+  take n fs ++ replicate (chunkSize-n) (Dft.plex 0)
+
+highPass :: [C] -> [C]
+highPass fs =
+  replicate (chunkSize-1) (Dft.plex 0) ++ drop (chunkSize-1) fs
+
+lowPass :: [C] -> [C]
+lowPass fs =
+  take 1 fs ++ replicate (chunkSize-1) (Dft.plex 0)
+
+filterWav :: ([C] -> [C]) -> Wav -> IO Wav
+filterWav pass w = do
+  let Wav {header,dat} = w
+  -- Using mostly point-free style here. Is it better?
+  let
+    processChunk :: [R] -> [R]
+    processChunk =
+      map Dft.realPart
+      . Dft.idft
+      . pass
+      . Dft.dft
+      . map Dft.plex
+  let
+    processDat :: Dat -> Dat
+    processDat =
+      fromS16 . map unfloat
+      . concat
+      . map processChunk
+      . chunksOf chunkSize . prepad 0 chunkSize
+      . map float . toS16
+
+  (pure . packWavPatchingSize header . processDat) dat
+
+
+-- Pad a list with zeros to make it's size a multiple of M
+prepad :: a -> Int -> [a] -> [a]
+prepad zero m xs = do
+  let len = length xs
+  let r = len `mod` m
+  let x = if r == 0 then 0 else m - r
+  replicate x zero ++ xs
+
 
 -- Expore DFT. Check the inverse transform, IDFT, really is the inverse!
-explore :: Int -> Wav -> IO Wav
-explore chunkSize w = do
+explore :: Wav -> IO Wav
+explore w = do
 
   let Wav {header,dat} = w
   let chunks = chunksOf chunkSize $ map float $ toS16 dat
@@ -211,6 +268,14 @@ packWav header@Header{bitsPerSample,numberOfChannels,numberOfBlocks} dat = do
   then Wav { header, dat }
   else error (printf "packWav, dataSize=%d, length(dat)=%d" dataSize z)
 
+packWavPatchingSize :: Header -> Dat -> Wav
+packWavPatchingSize header@Header{bitsPerSample,numberOfChannels} dat = do
+  let bytesPerBlock = cast (numberOfChannels * bitsPerSample `div` 8)
+  let z = sizeDat dat
+  let numberOfBlocks = z `div` bytesPerBlock
+  Wav { header = header { numberOfBlocks }, dat }
+
+
 saveWav :: FilePath ->  Wav -> IO ()
 saveWav path Wav{header,dat} = do
   writeHeader path header
@@ -247,7 +312,9 @@ data Header = Header
 info :: String -> Header -> String
 info tag Header{ numberOfChannels, sampleRate, bitsPerSample, numberOfBlocks} = do
   let duration :: R = cast numberOfBlocks / cast sampleRate
-  printf "%s: %s %dbit  %6dHz  %0.2fs"
+  let bytesPerBlock = numberOfChannels * bitsPerSample `div` 8
+  let dataSize = numberOfBlocks * cast bytesPerBlock
+  printf "%s: %s %dbit  %6dHz  %0.2fs [#blocks=%d, size=%d]"
     (justify 16 tag)
     (justify 6 (case numberOfChannels of
                   1 -> "mono"
@@ -256,6 +323,8 @@ info tag Header{ numberOfChannels, sampleRate, bitsPerSample, numberOfBlocks} = 
     bitsPerSample
     sampleRate
     duration
+    numberOfBlocks
+    dataSize
   where justify n s = s ++ replicate (n - length s) ' '
 
 
