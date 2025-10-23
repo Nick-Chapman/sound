@@ -39,11 +39,10 @@ parseConfig = \case
   [i,"mono"     ,o] -> mk i o $ Mono
   [i,"8bit"     ,o] -> mk i o $ EightBit
   [i,"vol",f    ,o] -> mk i o $ Volume (read f)
-  [i,"hurry",n  ,o] -> mk i o $ Hurry (read n)
-  [i,"dally",n  ,o] -> mk i o $ Dally (read n)
   [i,"explore"  ,o] -> mk i o $ Explore_DFT
   [i,"low"      ,o] -> mk i o $ LowPass
   [i,"high"     ,o] -> mk i o $ HighPass
+  [i,"speed",n  ,o] -> mk i o $ Speed (read n)
   xs ->
     error (printf "unknown args: %s" (show xs))
   where
@@ -57,10 +56,9 @@ data Mode
   | Mono
   | EightBit
   | Volume R
-  | Hurry U32
-  | Dally U32
   | Explore_DFT
   | LowPass | HighPass
+  | Speed R
   deriving Show
 
 execModeInfo :: Mode -> Wav -> IO Wav
@@ -77,11 +75,22 @@ execMode = \case
   Mono -> pure . monoize
   EightBit -> pure . eightBit
   Volume f -> pure . changeVolume f
-  Hurry{} -> undefined
-  Dally{} -> undefined
   Explore_DFT -> explore
   LowPass -> filterWav lowPass
   HighPass -> filterWav highPass
+  Speed factor -> pure . speed factor
+
+
+-- Change speed by modifying sampleRate.
+-- Faster speed -> higher pitch; Slower speed -> lower pitch.
+speed :: R -> Wav -> Wav
+speed factor w = do
+  let Wav {header,dat} = w
+  let Header {sampleRate=r} = header
+  let r' = truncate (cast r * factor)
+  let header' = header { sampleRate = r' }
+  packWav header' dat
+
 
 -- Try increasing. Gets slower. Need FFT !!
 -- (And some chunks have a delta exceeding epsilon)
@@ -314,17 +323,17 @@ info tag Header{ numberOfChannels, sampleRate, bitsPerSample, numberOfBlocks} = 
   let duration :: R = cast numberOfBlocks / cast sampleRate
   let bytesPerBlock = numberOfChannels * bitsPerSample `div` 8
   let dataSize = numberOfBlocks * cast bytesPerBlock
-  printf "%s: %s %dbit  %6dHz  %0.2fs [#blocks=%d, size=%d]"
+  printf "%s: %s %dbit  [#blocks=%d, size=%d]  %6dHz  %0.2fs"
     (justify 16 tag)
     (justify 6 (case numberOfChannels of
                   1 -> "mono"
                   2 -> "stereo"
                   n -> printf "%d-chan" n))
     bitsPerSample
-    sampleRate
-    duration
     numberOfBlocks
     dataSize
+    sampleRate
+    duration
   where justify n s = s ++ replicate (n - length s) ' '
 
 
