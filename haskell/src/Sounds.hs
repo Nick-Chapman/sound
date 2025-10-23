@@ -1,7 +1,7 @@
 module Sounds (main) where
 
 import Control.Exception (assert)
-import Control.Monad (ap,liftM)
+import Control.Monad (ap,liftM,when)
 import Data.Bits ((.&.),shiftR)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
@@ -12,11 +12,14 @@ import Data.List.Split (chunksOf)
 import Data.Word qualified as Word
 import System.Environment (getArgs)
 import Text.Printf (printf)
+import Dft qualified
 
 type U32 = Word.Word32
 type U16 = Word.Word16
 type U8 = Word.Word8
 type S16 = Int.Int16
+
+type R = Dft.R
 
 main :: IO ()
 main = do
@@ -37,6 +40,7 @@ parseConfig = \case
   [i,"vol",f    ,o] -> mk i o $ Volume (read f)
   [i,"hurry",n  ,o] -> mk i o $ Hurry (read n)
   [i,"dally",n  ,o] -> mk i o $ Dally (read n)
+  [i,"explore"  ,o] -> mk i o $ Explore_DFT
   xs ->
     error (printf "unknown args: %s" (show xs))
   where
@@ -49,27 +53,74 @@ data Mode
   | Repeat U32
   | Mono
   | EightBit
-  | Volume Float
+  | Volume R
   | Hurry U32
   | Dally U32
+  | Explore_DFT
   deriving Show
 
 execModeInfo :: Mode -> Wav -> IO Wav
 execModeInfo mode w = do
-  let w'@Wav{header} = execMode mode w
+  w'@Wav{header} <- execMode mode w
   printf "%s\n" (info (show mode) header)
   pure w'
 
-execMode :: Mode -> Wav -> Wav
+execMode :: Mode -> Wav -> IO Wav
 execMode = \case
-  Begin -> id
-  Repeat n -> repeatWave n
-  Thin n -> thinSampleRate n
-  Mono -> monoize
-  EightBit -> eightBit
-  Volume f -> changeVolume f
+  Begin -> pure
+  Repeat n -> pure . repeatWave n
+  Thin n -> pure . thinSampleRate n
+  Mono -> pure . monoize
+  EightBit -> pure . eightBit
+  Volume f -> pure . changeVolume f
   Hurry{} -> undefined
   Dally{} -> undefined
+  Explore_DFT -> explore chunkSize
+
+-- Try increasing. Gets slower. Need FFT !!
+-- (And some chunks have a delta exceeding epsilon)
+chunkSize :: Int
+chunkSize = 8
+
+-- Expore DFT. Check the inverse transform, IDFT, really is the inverse!
+explore :: Int -> Wav -> IO Wav
+explore chunkSize w = do
+
+  let Wav {header,dat} = w
+  let chunks = chunksOf chunkSize $ map float $ toS16 dat
+
+  -- Run DFT followed by IDFT. Compute deltas.
+  let
+    transformed :: [(Int,[R],[Dft.C],[R],R)]
+    transformed =
+      [ (i,xs,fs,ys,delta)
+      | (i,xs) <- zip [1::Int ..] chunks
+      , let fs = Dft.dft (map Dft.plex xs)
+      , let ys = map Dft.realPart $ Dft.idft fs
+      , let delta = sum [ abs a - abs b | (a,b) <- zip xs ys ]
+      ]
+
+  -- Check/report any badly transformed chunks...
+  let
+    epsilon :: R -- Add more zeros to be too tight...
+    epsilon = 0.0000000001 -- for doubles
+    --epsilon = 0.001 -- for floats
+
+  let bad = [ tup | tup@(_,_,_,_,delta) <- transformed , delta > epsilon ]
+  let badN = length bad
+  when (badN > 0) $ do
+    printf "%d/%d chunks changed more than eps=%f\n"
+      badN (length transformed) epsilon
+    let seeExamples = False
+    when (seeExamples) $ do
+      sequence_ [ do printf "%5d (%f) %s --> %s\n"
+                       i delta (show xs) (show back)
+                | (i,xs,_fs,back,delta) <- take 20 bad ]
+
+  -- Build the transformed chunks into a new waveform
+  let yss = [ ys | (_,_,_,ys,_) <- transformed ]
+  let dat' = fromS16 $ map unfloat $ concat yss
+  pure $ packWav header dat'
 
 
 repeatWave :: U32 -> Wav -> Wav
@@ -129,7 +180,7 @@ eightBit w = do
               , byte <- [ 0, BS.index bs (1 + 2 * cast i) ]
               ]
 
-changeVolume :: Float -> Wav -> Wav
+changeVolume :: R -> Wav -> Wav
 changeVolume f w = do
   let Wav {header,dat} = w
   let Header {bitsPerSample} = header
@@ -137,7 +188,7 @@ changeVolume f w = do
   let dat' = (fromS16 . map (unfloat . attenuate . float) . toS16) dat
   packWav header dat'
   where
-    attenuate :: Float -> Float
+    attenuate :: R -> R
     attenuate x = x * f
 
 data Wav = Wav { header :: Header, dat :: Dat }
@@ -195,7 +246,7 @@ data Header = Header
 
 info :: String -> Header -> String
 info tag Header{ numberOfChannels, sampleRate, bitsPerSample, numberOfBlocks} = do
-  let duration :: Float = cast numberOfBlocks / cast sampleRate
+  let duration :: R = cast numberOfBlocks / cast sampleRate
   printf "%s: %s %dbit  %6dHz  %0.2fs"
     (justify 16 tag)
     (justify 6 (case numberOfChannels of
@@ -360,8 +411,8 @@ makeS16 lo hi = cast (cast lo + 256 * cast hi :: Int)
 splitS16 :: S16 -> (U8,U8)
 splitS16 x = (cast (x .&. 0xFF) , cast ((x `shiftR` 8) .&. 0xFF))
 
-float :: S16 -> Float
+float :: S16 -> R
 float = cast
 
-unfloat :: Float -> S16
+unfloat :: R -> S16
 unfloat = truncate
