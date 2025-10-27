@@ -1,13 +1,13 @@
 
 -- Discrete Fourier Transform. And the inverse operation.
 
-module Dft (R,C,dft,idft,realPart,plex) where
+module Dft (R,C,dft,idft,mag,realPart,plex,fft,ifft) where
 
 import Text.Printf (printf)
 
 import Prelude qualified
---import Prelude hiding (exp,sum)
-import Prelude (Int,Show(..),zip,length,foldl,fromIntegral,(*),(+),(/),(-),pi,sin,cos)
+import Prelude hiding (exp,sum)
+--import Prelude (Int,Show(..),zip,length,foldl,fromIntegral,(*),(+),(/),(-),pi,sin,cos)
 
 -- Pick a precision for floating point numbers
 type R = Prelude.Double
@@ -21,6 +21,55 @@ data Complex a = Complex { real :: a, imag :: a }
 instance Show a => Show (Complex a) where
   show Complex{real=x,imag=y} =
     printf "%s+j%s" (show x) (show y)
+
+
+sub :: C -> C -> C
+sub a b = a `add` ( plex (-1) `mult` b)
+
+ispow2 :: Int -> Bool
+ispow2 x = x == 1 || x `mod` 2 ==0 && ispow2 (x `div` 2)
+
+-- WIP: Fast Fourier Transform
+fft :: [C] -> [C]
+fft xs = if ispow2 (length xs) then fft' xs else error (show ("fft/not-power2",length xs))
+
+fft' :: [C] -> [C]
+fft' = \case
+  [x] -> [x]
+  xs -> do
+    let bigN = length xs
+    let ms = [ exp (j `mult` plex (pi * float(-2 * k) / float bigN)) | k <- [0..] ]
+    let (evenXs,oddXs) = split xs
+    let bigE = fft' evenXs
+    let bigO = fft' oddXs
+    let pairs = zip bigE [ m `mult` o | (m,o) <- zip ms bigO ]
+    [ e `add` mo | (e,mo) <- pairs ] ++ [ e `sub` mo | (e,mo) <- pairs ]
+
+split :: [C] -> ([C],[C])
+split = \case
+  [] -> ([],[])
+  x:xs -> let (ys,zs) = split xs in (x:zs,ys)
+
+ifft :: [C] -> [C]
+ifft xs =
+  if not (ispow2 (length xs)) then error (show ("ifft/not-power2",length xs)) else do
+    let bigN = length xs
+    let scale = plex (1 / float bigN)
+    [ scale `mult` c | c <- ifft' xs ] -- Final division by N
+
+ifft' :: [C] -> [C]
+ifft' = \case
+  [x] -> [x]
+  xs -> do
+    let bigN = length xs
+    let ms = [ exp (j `mult` plex (pi * float(2 -- Loose sign
+                                              * k) / float bigN)) | k <- [0..] ]
+    let (evenXs,oddXs) = split xs
+    let bigE = ifft' evenXs
+    let bigO = ifft' oddXs
+    let pairs = zip bigE [ m `mult` o | (m,o) <- zip ms bigO ]
+    [ e `add` mo | (e,mo) <- pairs ] ++ [ e `sub` mo | (e,mo) <- pairs ]
+
 
 
 -- DFT "Discrete Fourier Transform".
@@ -55,8 +104,8 @@ plex real = Complex { real, imag = 0 }
 j :: C
 j = Complex { real = 0, imag = 1 }
 
---_magnitude :: C -> R
---_magnitude Complex{real=x,imag=y} = Prelude.sqrt (x*x + y*y)
+mag :: C -> R
+mag Complex{real=x,imag=y} = Prelude.sqrt (x*x + y*y)
 
 realPart :: C -> R
 realPart Complex{real=x} = x
