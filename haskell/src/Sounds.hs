@@ -164,9 +164,9 @@ filterWav pass w = do
     processChunk :: [R] -> [R]
     processChunk =
       map Dft.realPart
-      . Dft.idft
+      . Dft.ifft
       . pass
-      . Dft.dft
+      . Dft.fft
       . map Dft.plex
   let
     processDat :: Dat -> Dat
@@ -189,6 +189,10 @@ prepad zero m xs = do
   replicate x zero ++ xs
 
 
+chunkSize :: Int
+chunkSize = 1024 -- for the DFT operation (FFT allows big chunkSize)
+
+
 -- Expore DFT. Check the inverse transform, IDFT, really is the inverse!
 explore :: Wav -> IO Wav
 explore w = do
@@ -196,56 +200,40 @@ explore w = do
   let Wav {header,dat} = w
   let chunks = chunksOf chunkSize $ prepad 0 chunkSize $ map float $ toS16 dat
 
-  -- Run DFT followed by IDFT. Compute deltas.
+  -- Run DFT followed by IDFT. Compute inverse is within epsilon.
   let
-    transformed :: [(Int,[R],[Dft.C],[Dft.C],[R],[R])]
+    transformed :: [(Int,[R],[Dft.C],[R])]
     transformed =
-      [ (i,xs,fs,fs2,ys,deltas)
+      [ (i,xs,fs,ys)
       | (i,xs) <- zip [1::Int ..] chunks
-      , let fs = Dft.dft (map Dft.plex xs)
-      , let fs2 = Dft.fft (map Dft.plex xs)
-      , let ys = map Dft.realPart $ Dft.ifft fs2 -- way quicker that fs
-      , let deltas = [ abs (Dft.realPart a - Dft.realPart b) | (a,b) <- zip fs fs2 ]
+      , let fs = Dft.fft (map Dft.plex xs)
+      , let ys = map Dft.realPart $ Dft.ifft fs
       ]
 
   -- Check/report any badly transformed chunks...
   let
-    epsilon :: R -- Add more zeros to be too tight...
-    epsilon = 0.00000001 -- for doubles
-    --epsilon = 0.1 -- for floats
+    epsilon :: R
+    epsilon = 0.0000000001 -- for doubles
+    --epsilon = 0.01 -- for floats
 
   let bad = [ tup
-            | tup@(_,_xs,_fs,_fs2,_ys,_deltas) <- transformed
---          , any id [ delta > epsilon | delta <- _deltas ]
+            | tup@(_,_xs,_fs,_ys) <- transformed
             , any id [ abs (x - y) > epsilon | (x,y) <- zip _xs _ys ]
---          , length _fs /= length _fs2
             ]
 
   let badN = length bad
-  when (badN >= 0) $ do
+  when (badN > 0) $ do
     printf "%d/%d chunks changed more than eps=%f\n"
       badN (length transformed) epsilon
-    let seeExamples = True
+    let seeExamples = False
     when (seeExamples) $ do
-      {-sequence_ [ do printf "%5d (%f) %s --> %s\n"
-                       i delta (show xs) (show back)
-                | (i,xs,_fs,_f2,back,delta) <- take 20 bad ]-}
-      sequence_ [ do printf "%5d -- %s --> %s\n" -- #xs=%d #fs=%d #fs2=%d #ys=%d\n" -- %s --> %s | %s\n"
-                       i --(show deltas) --(show _xs) (show _fs) (show _fs2)
-                       --(length _xs) (length _fs) (length _fs2) (length _ys)
-                       (show _xs) (show _ys)
-                | (i,_xs,_fs,_fs2,_ys,_deltas) <- take 20 bad ]
+      sequence_ [ do printf "%5d -- %s --> %s\n" i (show _xs) (show _ys)
+                | (i,_xs,_fs,_ys) <- take 20 bad ]
 
   -- Build the transformed chunks into a new waveform
-  let yss = [ ys | (_,_,_,_,ys,_) <- transformed ]
+  let yss = [ ys | (_,_,_,ys) <- transformed ]
   let dat' = fromS16 $ map unfloat $ concat yss
   pure $ packWavPatchingSize header dat'
-
-
--- Try increasing. Gets slower. Need FFT !!
--- (And some chunks have a delta exceeding epsilon)
-chunkSize :: Int
-chunkSize = 128 -- for the DFT operation
 
 
 repeatWave :: U32 -> Wav -> Wav

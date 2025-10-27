@@ -1,7 +1,7 @@
 
--- Discrete Fourier Transform. And the inverse operation.
+-- Fast Discrete Fourier Transform. And inverse operation.
 
-module Dft (R,C,dft,idft,mag,realPart,plex,fft,ifft) where
+module Dft (R,C,realPart,plex,fft,ifft) where
 
 import Text.Printf (printf)
 
@@ -29,7 +29,7 @@ sub a b = a `add` ( plex (-1) `mult` b)
 ispow2 :: Int -> Bool
 ispow2 x = x == 1 || x `mod` 2 ==0 && ispow2 (x `div` 2)
 
--- WIP: Fast Fourier Transform
+-- Fast Fourier Transform.
 fft :: [C] -> [C]
 fft xs = if ispow2 (length xs) then fft' xs else error (show ("fft/not-power2",length xs))
 
@@ -50,6 +50,7 @@ split = \case
   [] -> ([],[])
   x:xs -> let (ys,zs) = split xs in (x:zs,ys)
 
+-- Inverse Fast Fourier Transform. Differences from FFT noted.
 ifft :: [C] -> [C]
 ifft xs =
   if not (ispow2 (length xs)) then error (show ("ifft/not-power2",length xs)) else do
@@ -71,28 +72,6 @@ ifft' = \case
     [ e `add` mo | (e,mo) <- pairs ] ++ [ e `sub` mo | (e,mo) <- pairs ]
 
 
-
--- DFT "Discrete Fourier Transform".
-dft :: [C] -> [C]
-dft xs = do
-  let bigN = length xs
-  [ sum [ xn `mult` exp (j `mult` plex (pi * float(-2 * k * n) / float bigN))
-        | (n,xn) <- zip [0::Int ..] xs
-        ]
-    | k <- [0::Int .. bigN-1]
-    ]
-
--- Inverse DFT. Differences from DFT noted.
-idft :: [C] -> [C]
-idft xs = do
-  let bigN = length xs
-  [ sum [ xn `mult` exp (j `mult` plex (pi * float(2 -- Loose sign
-                                                   * k * n) / float bigN))
-        | (n,xn) <- zip [0::Int ..] xs
-        ] `mult` plex (1 / float bigN) -- Final division by N
-    | k <- [0::Int .. bigN-1]
-    ]
-
 float :: Int -> R
 float = fromIntegral
 
@@ -104,16 +83,13 @@ plex real = Complex { real, imag = 0 }
 j :: C
 j = Complex { real = 0, imag = 1 }
 
-mag :: C -> R
-mag Complex{real=x,imag=y} = Prelude.sqrt (x*x + y*y)
+--mag :: C -> R
+--mag Complex{real=x,imag=y} = Prelude.sqrt (x*x + y*y)
 
 realPart :: C -> R
 realPart Complex{real=x} = x
 
 -- Operations on complex domain numbers.
-
-sum :: [C] -> C
-sum = foldl add (plex 0)
 
 exp :: C -> C
 exp Complex{real=x,imag=y} =
