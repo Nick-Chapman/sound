@@ -8,7 +8,7 @@ import Data.ByteString qualified as BS
 import Data.ByteString.Internal (w2c,c2w)
 import Data.Char qualified as Char
 import Data.Int qualified as Int
-import Data.List.Split (chunksOf)
+--import Data.List.Split qualified as Split (chunksOf)
 import Data.Word qualified as Word
 import System.Environment (getArgs)
 import Text.Printf (printf)
@@ -44,6 +44,7 @@ parseConfig = \case
   [i,"high"     ,o] -> mk i o $ HighPass
   [i,"speed",n  ,o] -> mk i o $ Speed (read n)
   [i,"hurry",n  ,o] -> mk i o $ Hurry (read n)
+  [i,"slow"     ,o] -> mk i o $ Slow
   xs ->
     error (printf "unknown args: %s" (show xs))
   where
@@ -61,6 +62,7 @@ data Mode
   | LowPass | HighPass
   | Speed R
   | Hurry R
+  | Slow
   deriving Show
 
 execModeInfo :: Mode -> Wav -> IO Wav
@@ -82,6 +84,62 @@ execMode = \case
   HighPass -> filterWav highPass
   Speed factor -> pure . speed factor
   Hurry factor -> hurry factor
+  Slow -> slow
+
+
+
+-- duplicate every packet; precursor to doing overlapped/windowed dft
+slow :: Wav -> IO Wav
+slow w = do
+  let Wav {header,dat} = w
+  let Header {numberOfChannels} = header
+  assert (numberOfChannels == 1) $ do
+  let size = 512
+  let han = hanSeq (size - 1)
+  let _window xs = [ h * x | (h,x) <- zip han xs ]
+
+  let _ = pairwise combFreq
+
+  let
+    processDat :: Dat -> Dat
+    processDat =
+      fromS16 . map unfloat
+      . concat
+      . map (map Dft.realPart . Dft.ifft)
+--      . pairwise combFreq
+      . map (Dft.fft . map Dft.plex)
+      . map _window
+      . overlappedChunksOf size (size `div` 2) . prepad 0 size
+      . map float . toS16
+
+  pure $ packWavPatchingSize header (processDat dat)
+
+
+pairwise :: (a -> a -> a) -> [a] -> [a]
+pairwise f = \case
+  [] -> []
+  [_] -> error "pairwise"
+  x1:x2:xs -> f x1 x2 : pairwise f xs
+
+combFreq :: [C] -> [C] -> [C]
+combFreq cs ds = [ c `Dft.add` d | (c,d) <- zip cs ds ]
+
+
+hanSeq :: Int -> [R]
+hanSeq bigN =
+  [ 0.5 * (1 - cos (2 * pi * cast n / cast bigN)) | n <- [ 0.. bigN ] ]
+
+
+chunksOf :: Int -> [a] -> [[a]]
+chunksOf size = overlappedChunksOf size size
+
+overlappedChunksOf :: Int -> Int -> [a] -> [[a]]
+overlappedChunksOf size step = \case
+  [] -> []
+  xs -> do
+    let chunk = take size xs
+    let xs' = drop step xs
+    chunk : overlappedChunksOf size step xs'
 
 
 -- Change speed by modifying sampleRate.
@@ -129,11 +187,13 @@ hurry factor w = do
   let
     processDat :: Dat -> Dat
     processDat =
-      fromS16 . map unfloat
+      fromS16
+      -- . map unfloat
       . concat
       . dropEvery (dropRate `div` 2) -- start dropping in middle of rate
       . chunksOf size . prepad 0 size
-      . map float . toS16 -- why bother to convert to S16 stream?
+      -- . map float
+      . toS16 -- why bother to convert to S16 stream?
 
   pure $ packWavPatchingSize header (processDat dat)
 

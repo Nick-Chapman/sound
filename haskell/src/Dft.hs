@@ -1,7 +1,7 @@
 
 -- Fast Discrete Fourier Transform. And inverse operation.
 
-module Dft (R,C,realPart,plex,fft,ifft) where
+module Dft (R,C,realPart,plex,fft,ifft,add) where
 
 import Text.Printf (printf)
 
