@@ -1,13 +1,13 @@
 
 synth.o: synth.c
-  gcc -g -o synth.o -c synth.c -Wall -Werror
+  gcc -g -o $@ -c $< -Wall -Werror
 
 synth: synth.o
-  gcc -o synth synth.o -lSDL2
+  gcc -o $@ $< -lSDL2
 
 
 myplay.o: myplay.c
-  gcc -g -o myplay.o -c myplay.c -Wall -Werror
+  gcc -g -o $@ -c $< -Wall -Werror
 
 myplay: myplay.o
-  gcc -o myplay myplay.o -lSDL2
+  gcc -o $@ $< -lSDL2
